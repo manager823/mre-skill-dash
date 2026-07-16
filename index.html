@@ -213,6 +213,8 @@
   .card-meta a{color:var(--black);text-decoration:underline;font-weight:600;}
   .card-delete{background:none;border:none;color:var(--gray-30);font-size:11px;cursor:pointer;padding:0;font-family:'Inter',sans-serif;font-weight:600;}
   .card-delete:hover{color:var(--black);}
+  .card-edit{background:none;border:none;color:var(--gray-50);font-size:11px;cursor:pointer;padding:0;font-family:'Inter',sans-serif;font-weight:600;margin-right:14px;}
+  .card-edit:hover{color:var(--black);text-decoration:underline;}
 
   .empty{text-align:center;padding:70px 20px;color:var(--gray-50);font-size:14px;border:2px dashed var(--gray-30);}
 
@@ -453,7 +455,7 @@
       </div>
       <div class="modal-actions">
         <button type="button" class="btn" id="cancelBtn">Cancel</button>
-        <button type="submit" class="btn solid">Save Skill</button>
+        <button type="submit" class="btn solid" id="saveSkillBtn">Save Skill</button>
       </div>
     </form>
   </div>
@@ -489,6 +491,7 @@ let activeCat = { mre:'ALL', cik:'ALL' };
 let activeStatus = { mre:'ALL', cik:'ALL' };
 let currentPage = 'dashboard';
 let modalCompany = 'mre';
+let editingSkillId = null;
 
 const STATUS_LABELS = { live:'Live', progress:'In Progress', planned:'Planned', hold:'On Hold', retired:'Retired' };
 
@@ -516,6 +519,17 @@ async function apiDelete(co, id){
   const params = new URLSearchParams({ action:'delete', company: co.toUpperCase(), id });
   const res = await fetch(`${APPS_SCRIPT_URL}?${params.toString()}`);
   if(!res.ok) throw new Error('delete failed');
+  return await res.json();
+}
+
+async function apiUpdate(co, skill){
+  const params = new URLSearchParams({
+    action: 'update', company: co.toUpperCase(),
+    id: skill.id, name: skill.name, category: skill.category,
+    status: skill.status, owner: skill.owner, desc: skill.desc, command: skill.command, link: skill.link
+  });
+  const res = await fetch(`${APPS_SCRIPT_URL}?${params.toString()}`);
+  if(!res.ok) throw new Error('update failed');
   return await res.json();
 }
 
@@ -626,6 +640,7 @@ function renderGrid(co){
         ${linkHtml}
       </div>
       <div style="text-align:right;">
+        <button class="card-edit" data-id="${s.id}" data-co="${co}">Edit</button>
         <button class="card-delete" data-id="${s.id}" data-co="${co}">Remove</button>
       </div>
     </div>`;
@@ -646,6 +661,15 @@ function renderGrid(co){
           showMsg('Delete failed — check connection and try again');
         }
       }
+    });
+  });
+
+  grid.querySelectorAll('.card-edit').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const c = btn.dataset.co;
+      const skill = state[c].find(s=>s.id===btn.dataset.id);
+      if(!skill) return;
+      openSkillModal(c, skill);
     });
   });
 }
@@ -726,16 +750,33 @@ document.querySelectorAll('[data-refresh]').forEach(el=>{
   });
 });
 
+function openSkillModal(co, skill=null){
+  modalCompany = co;
+  editingSkillId = skill ? skill.id : null;
+  document.getElementById('skillForm').reset();
+  const catSelect = document.getElementById('f_cat');
+  catSelect.innerHTML = Object.entries(COMPANIES[co].categories)
+    .map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
+
+  if(skill){
+    document.getElementById('modalTitle').textContent = 'Edit ' + co.toUpperCase() + ' Skill';
+    document.getElementById('saveSkillBtn').textContent = 'Save Changes';
+    document.getElementById('f_name').value = skill.name || '';
+    catSelect.value = skill.category || '';
+    document.getElementById('f_status').value = skill.status || 'live';
+    document.getElementById('f_owner').value = skill.owner || '';
+    document.getElementById('f_desc').value = skill.desc || '';
+    document.getElementById('f_command').value = skill.command || '';
+    document.getElementById('f_link').value = skill.link || '';
+  } else {
+    document.getElementById('modalTitle').textContent = 'Add a ' + co.toUpperCase() + ' Skill';
+    document.getElementById('saveSkillBtn').textContent = 'Save Skill';
+  }
+  document.getElementById('overlay').classList.add('open');
+}
+
 document.querySelectorAll('[data-add]').forEach(el=>{
-  el.addEventListener('click', ()=>{
-    modalCompany = el.dataset.add;
-    document.getElementById('skillForm').reset();
-    document.getElementById('modalTitle').textContent = 'Add a ' + modalCompany.toUpperCase() + ' Skill';
-    const catSelect = document.getElementById('f_cat');
-    catSelect.innerHTML = Object.entries(COMPANIES[modalCompany].categories)
-      .map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
-    document.getElementById('overlay').classList.add('open');
-  });
+  el.addEventListener('click', ()=>openSkillModal(el.dataset.add));
 });
 document.getElementById('cancelBtn').addEventListener('click', ()=>{
   document.getElementById('overlay').classList.remove('open');
@@ -749,7 +790,7 @@ document.getElementById('skillForm').addEventListener('submit', async (e)=>{
   const co = modalCompany;
   const cat = document.getElementById('f_cat').value;
   const skill = {
-    id: nextId(co, cat),
+    id: editingSkillId || nextId(co, cat),
     name: document.getElementById('f_name').value.trim(),
     category: cat,
     status: document.getElementById('f_status').value,
@@ -759,12 +800,19 @@ document.getElementById('skillForm').addEventListener('submit', async (e)=>{
     link: document.getElementById('f_link').value.trim()
   };
   try{
-    await apiAdd(co, skill);
-    state[co].push(skill);
+    if(editingSkillId){
+      await apiUpdate(co, skill);
+      const idx = state[co].findIndex(s=>s.id===editingSkillId);
+      if(idx>-1) state[co][idx] = skill;
+      showMsg('Changes saved to the Sheet');
+    } else {
+      await apiAdd(co, skill);
+      state[co].push(skill);
+      showMsg('Saved to the Sheet — visible to the whole team');
+    }
     document.getElementById('overlay').classList.remove('open');
     renderCompanyPage(co);
     renderDashboard();
-    showMsg('Saved to the Sheet — visible to the whole team');
   }catch(e){
     showMsg('Save failed — check connection and try again');
   }
