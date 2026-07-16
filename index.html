@@ -476,26 +476,48 @@ let modalCompany = 'mre';
 
 const STATUS_LABELS = { live:'Live', progress:'In Progress', planned:'Planned', hold:'On Hold', retired:'Retired' };
 
-async function loadCompany(co){
-  const cfg = COMPANIES[co];
-  try{
-    const result = await window.storage.get(cfg.storageKey, true);
-    state[co] = result ? JSON.parse(result.value) : null;
-  }catch(e){ state[co] = null; }
-  if(!state[co]){
-    state[co] = cfg.defaults.slice();
-    await saveCompany(co, false);
-  }
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyJarYHGZPXr-th-wf4atMUoNZO90HYd8ST5RMQkLjWwkfjHGwmyThHktWYj7Eqvmy0/exec';
+
+async function apiList(co){
+  const url = `${APPS_SCRIPT_URL}?action=list&company=${co.toUpperCase()}`;
+  const res = await fetch(url);
+  if(!res.ok) throw new Error('list failed');
+  return await res.json();
 }
 
-async function saveCompany(co, showToast=true){
+async function apiAdd(co, skill){
+  const params = new URLSearchParams({
+    action: 'add', company: co.toUpperCase(),
+    id: skill.id, name: skill.name, category: skill.category,
+    status: skill.status, owner: skill.owner, desc: skill.desc, link: skill.link
+  });
+  const res = await fetch(`${APPS_SCRIPT_URL}?${params.toString()}`);
+  if(!res.ok) throw new Error('add failed');
+  return await res.json();
+}
+
+async function apiDelete(co, id){
+  const params = new URLSearchParams({ action:'delete', company: co.toUpperCase(), id });
+  const res = await fetch(`${APPS_SCRIPT_URL}?${params.toString()}`);
+  if(!res.ok) throw new Error('delete failed');
+  return await res.json();
+}
+
+async function loadCompany(co, silent=false){
   const cfg = COMPANIES[co];
   try{
-    const result = await window.storage.set(cfg.storageKey, JSON.stringify(state[co]), true);
-    if(!result) throw new Error('no result');
-    if(showToast) showMsg('Saved — visible to the whole team');
+    const rows = await apiList(co);
+    state[co] = rows;
+    // First-run seed: if MRE comes back empty, push the known defaults into the Sheet once.
+    if(co==='mre' && rows.length===0 && cfg.defaults.length>0){
+      for(const skill of cfg.defaults){
+        try{ await apiAdd(co, skill); }catch(e){ /* continue seeding best-effort */ }
+      }
+      state[co] = await apiList(co);
+    }
   }catch(e){
-    showMsg('Save failed — check connection and try again');
+    if(!silent) showMsg('Could not reach the Google Sheet — check the site is online');
+    state[co] = state[co] || [];
   }
 }
 
@@ -591,10 +613,16 @@ function renderGrid(co){
     btn.addEventListener('click', async ()=>{
       if(confirm('Remove this skill from the hub for everyone?')){
         const c = btn.dataset.co;
-        state[c] = state[c].filter(s=>s.id!==btn.dataset.id);
-        await saveCompany(c);
-        renderCompanyPage(c);
-        renderDashboard();
+        const id = btn.dataset.id;
+        try{
+          await apiDelete(c, id);
+          state[c] = state[c].filter(s=>s.id!==id);
+          renderCompanyPage(c);
+          renderDashboard();
+          showMsg('Removed');
+        }catch(e){
+          showMsg('Delete failed — check connection and try again');
+        }
       }
     });
   });
@@ -707,16 +735,21 @@ document.getElementById('skillForm').addEventListener('submit', async (e)=>{
     desc: document.getElementById('f_desc').value.trim(),
     link: document.getElementById('f_link').value.trim()
   };
-  state[co].push(skill);
-  await saveCompany(co);
-  document.getElementById('overlay').classList.remove('open');
-  renderCompanyPage(co);
-  renderDashboard();
+  try{
+    await apiAdd(co, skill);
+    state[co].push(skill);
+    document.getElementById('overlay').classList.remove('open');
+    renderCompanyPage(co);
+    renderDashboard();
+    showMsg('Saved to the Sheet — visible to the whole team');
+  }catch(e){
+    showMsg('Save failed — check connection and try again');
+  }
 });
 
-async function loadAll(){
-  await loadCompany('mre');
-  await loadCompany('cik');
+async function loadAll(silent=false){
+  await loadCompany('mre', silent);
+  await loadCompany('cik', silent);
   renderCompanyPage('mre');
   renderCompanyPage('cik');
   renderDashboard();
@@ -726,7 +759,8 @@ async function loadAll(){
 const initialHash = window.location.hash.replace('#','');
 if(['dashboard','mre','cik'].includes(initialHash)) switchPage(initialHash);
 
-setInterval(loadAll, 20000);
+// Background sync stays quiet on failure — only manual Refresh clicks surface errors
+setInterval(()=>loadAll(true), 20000);
 loadAll();
 </script>
 </body>
