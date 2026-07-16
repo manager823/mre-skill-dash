@@ -194,6 +194,18 @@
   .card .cat{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:var(--gray-50);}
   .card h3{font-family:'Archivo Black',sans-serif;font-weight:400;font-size:17px;margin:2px 0 0;line-height:1.3;text-transform:none;}
   .card p.desc{font-size:13px;color:var(--gray-70);line-height:1.5;margin:2px 0 4px;flex:1;}
+  .card-command{
+    background:var(--gray-08);border:1px solid var(--gray-30);
+    padding:9px 11px;margin:2px 0 4px;
+  }
+  .card-command .cc-label{
+    font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:700;
+    letter-spacing:.1em;text-transform:uppercase;color:var(--gray-50);
+    margin-bottom:4px;display:block;
+  }
+  .card-command .cc-phrase{
+    font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--black);line-height:1.5;
+  }
   .card-meta{
     display:flex;justify-content:space-between;align-items:center;
     font-size:11.5px;color:var(--gray-50);border-top:1px solid var(--line);padding-top:10px;margin-top:4px;
@@ -432,6 +444,10 @@
         <textarea id="f_desc" placeholder="Plain description of the workflow and what triggers it"></textarea>
       </div>
       <div class="field">
+        <label>Say This (what to tell Claude)</label>
+        <textarea id="f_command" placeholder='e.g. "Run the Monday listing review for [address]"'></textarea>
+      </div>
+      <div class="field">
         <label>Link (optional)</label>
         <input type="text" id="f_link" placeholder="Asana project, Slack channel, file path…">
       </div>
@@ -489,7 +505,7 @@ async function apiAdd(co, skill){
   const params = new URLSearchParams({
     action: 'add', company: co.toUpperCase(),
     id: skill.id, name: skill.name, category: skill.category,
-    status: skill.status, owner: skill.owner, desc: skill.desc, link: skill.link
+    status: skill.status, owner: skill.owner, desc: skill.desc, command: skill.command, link: skill.link
   });
   const res = await fetch(`${APPS_SCRIPT_URL}?${params.toString()}`);
   if(!res.ok) throw new Error('add failed');
@@ -590,6 +606,11 @@ function renderGrid(co){
 
   grid.innerHTML = list.map(s=>{
     const linkHtml = s.link ? `<a href="#" onclick="return false;" title="${escapeHtml(s.link)}">${escapeHtml(truncate(s.link,24))}</a>` : '<span></span>';
+    const commandHtml = s.command ? `
+      <div class="card-command">
+        <span class="cc-label">Say This</span>
+        <span class="cc-phrase">"${escapeHtml(s.command)}"</span>
+      </div>` : '';
     return `
     <div class="card">
       <div class="card-top">
@@ -599,6 +620,7 @@ function renderGrid(co){
       <div class="cat">${COMPANIES[co].categories[s.category] || s.category}</div>
       <h3>${escapeHtml(s.name)}</h3>
       <p class="desc">${escapeHtml(s.desc || 'No description yet.')}</p>
+      ${commandHtml}
       <div class="card-meta">
         <span>${escapeHtml(s.owner || 'Unassigned')}</span>
         ${linkHtml}
@@ -733,6 +755,7 @@ document.getElementById('skillForm').addEventListener('submit', async (e)=>{
     status: document.getElementById('f_status').value,
     owner: document.getElementById('f_owner').value.trim(),
     desc: document.getElementById('f_desc').value.trim(),
+    command: document.getElementById('f_command').value.trim(),
     link: document.getElementById('f_link').value.trim()
   };
   try{
